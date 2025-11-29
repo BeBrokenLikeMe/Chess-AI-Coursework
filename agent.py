@@ -1,6 +1,6 @@
 import copy
 import time
-from chessmaker.chess.base import (Board, Piece, Player, MoveOption, Position)
+from chessmaker.chess.base import (Board, Player, Position)
 
 # Visualise a bitboard
 
@@ -307,6 +307,7 @@ def get_pawn_moves_and_captures(bitboard, piece) -> (list[(int, int)], list[(int
                         pawn_moves.append((piece, sq2))
 
     captures = [(1, forward), (-1, forward)]
+    ep_bitboard = bitboard[enpassant]
 
     for dx, dy in captures:
         new_x = pos_x + dx
@@ -317,10 +318,10 @@ def get_pawn_moves_and_captures(bitboard, piece) -> (list[(int, int)], list[(int
 
         sq = position_to_index(new_x, new_y)
 
-        if own & (1 << sq):
-            continue
-
         if opp & (1 << sq):
+            pawn_captures.append((piece, sq))
+
+        elif ep_bitboard & (1 << sq):
             pawn_captures.append((piece, sq))
 
     return pawn_moves, pawn_captures
@@ -442,9 +443,11 @@ def test_for_check(bitboard) -> bool:
 def make_temporary_move(bitboard, start_sq, end_sq):
     new = bitboard.copy()
 
-    # Identify piece type and colour on start square
     ptype = piece_type_on_square(new, start_sq)
     pcol  = piece_colour_on_square(new, start_sq)
+
+    ep_square_bit = new[enpassant]
+    new[enpassant] = 0
 
     white_map = {
         "pawn": Wpawn, "knight": Wknight, "bishop": Wbishop,
@@ -476,6 +479,11 @@ def make_temporary_move(bitboard, start_sq, end_sq):
         elif pcol == "black" and 0 <= end_sq <= 4:
             new[Bpawn] = remove_bit(new[Bpawn], end_sq)
             new[Bqueen] = set_bit(new[Bqueen], end_sq)
+
+        # Check for enpassant
+        if abs(start_sq - end_sq) == 10:
+            skipped_sq = (start_sq + end_sq) // 2
+            new[enpassant] = (1 << skipped_sq)
 
     update_bitboards(new)
 
@@ -538,11 +546,11 @@ def calculate_material(bitboard) -> (int, int):
     white_material_total = 0
 
     material_map = {
-        "pawn" : 1,
-        "knight" : 4,
-        "bishop" : 3,
-        "right" : 8,
-        "queen" : 8,
+        "pawn" : 10,
+        "knight" : 40,
+        "bishop" : 30,
+        "right" : 80,
+        "queen" : 80,
         "king" : 0
     }
 
@@ -819,17 +827,34 @@ def base_case(bitboard, depth, start_time, time_limit):
 
 def evaluate(bitboard):
     white_material, black_material = calculate_material(bitboard)
+    wknight_mobility, bknight_mobility = calculate_knight_mobility(bitboard)
+
+    return (white_material + wknight_mobility) - (black_material + bknight_mobility)
+
+def calculate_knight_mobility(bitboard):
+    black_mobility = 0
+    white_mobility = 0
 
     knight_mobility_table = [
         -1, 0, 0, 0, -1,
-         0, 2, 2, 2,  0,
-         0, 3, 5, 3,  0,
-         0, 2, 2, 2,  0,
+        0, 2, 2, 2, 0,
+        0, 3, 5, 3, 0,
+        0, 2, 2, 2, 0,
         -1, 0, 0, 0, -1,
     ]
 
+    for sq in range(25):
+        piece_type = piece_type_on_square(bitboard, sq)
+        piece_colour = piece_colour_on_square(bitboard, sq)
 
-    return white_material - black_material
+        if piece_type == "knight":
+            if piece_colour == 'white':
+                white_mobility += knight_mobility_table[sq]
+            else:
+                black_mobility += knight_mobility_table[sq]
+
+    return white_mobility, black_mobility
+
 
 class SearchTimeout(Exception):
     pass
